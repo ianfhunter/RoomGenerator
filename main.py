@@ -2,7 +2,10 @@ from random import randint, choice
 import numpy as np
 from enum import Enum, auto
 from PIL import Image, ImageDraw
-import sys, os
+import sys
+import os
+import tracery
+import pathlib
 
 class Cell():
     class Type(Enum):
@@ -11,7 +14,13 @@ class Cell():
         DOOR = auto()
         PORTAL = auto()
         FIRE = auto()
-        PLAYER = auto()
+        PLAYER_ARCHER = auto()
+        PLAYER_FIGHTER = auto()
+        PLAYER_MAGE = auto()
+        PLAYER_CLERIC = auto()
+        PLAYER_DRUID = auto()
+        PLAYER_BMAGE = auto()
+        PLAYER_PALADIN = auto()
 
     def __init__(self):
         self.repr = " "
@@ -25,7 +34,13 @@ class Cell():
             Cell.Type.DOOR: "▤",
             Cell.Type.PORTAL: "🌀",
             Cell.Type.FIRE: "🔥",
-            Cell.Type.PLAYER: "@"
+            Cell.Type.PLAYER_ARCHER: "A",
+            Cell.Type.PLAYER_FIGHTER: "F",
+            Cell.Type.PLAYER_MAGE: "W",
+            Cell.Type.PLAYER_CLERIC: "C",
+            Cell.Type.PLAYER_DRUID: "D",
+            Cell.Type.PLAYER_BMAGE: "B",
+            Cell.Type.PLAYER_PALADIN: "P"
         }
         self.type = t
         self.repr = type_repr_map[t]
@@ -63,9 +78,74 @@ class Room():
             for y in range(len(self.grid)):
                 for x in range(len(self.grid[0])):
                     i.paintTile(self.grid[y][x].type, y, x)
-            i.save()
+            return i.save()
+        elif gui == "describe":
+
+            wall_count = str(4)
+            room_rules = {
+                'room':"The room consists of "+wall_count+ " walls #wall_detail#. #wall_decor#.",
+                'wall_detail': [
+                    "made of solid stone", 
+                    "that are crumbling from old age",
+                    "overgrown with vines",
+                    "perfectly tiled with old grey stone slabs"
+                ],
+                'wall_decor': [
+                    "On one of the walls #wall_hanging#",
+                    "On the ground #floor_decor#"
+                ],
+                "wall_hanging": [
+#                    "are several scones, illuminating the room"    #TODO: Lighting
+                    "is a torn tapestry telling a story of #legend#",
+                    "an engraving depicting #legend#",
+                    "a shattered mirror hangs by the thinnest of strings"
+                ],
+                "legend":[
+                    "great warriors fighting a terrible evil",
+                    "a snake with seven heads",
+                    "a dragon eating terrified villagers",
+                    "women sacrificing children to a fiend"
+                ],
+                "floor_decor": [
+                    "dust piles up in heaps",
+                    "dried blood stains indicate signs of a long-forgotten battle",
+                    "stray bones crack underfoot"
+                ]
+            }
+            grammar = tracery.Grammar(room_rules)
+            description = grammar.flatten("#room#")
+
+
+            contents = {}
+            for y in range(len(self.grid)):
+                for x in range(len(self.grid[0])):
+                    t = self.grid[y][x].type
+                    if t in contents:
+                        contents[t] += 1
+                    else:
+                        contents[t] = 1
+            for x in contents:
+                if x in [Cell.Type.FIRE]:
+                    fire_rules = {
+                        'fire':"#fire2#",
+                        "fire2":[
+                            "You feel the heat of a fire.",
+                            "A fire gives the room a pleasant glow."
+                        ]
+                    }
+                    grammar = tracery.Grammar(fire_rules)
+                    description += grammar.flatten("#fire#")
+                if x in [Cell.Type.DOOR]:
+                    if contents[x] > 1:
+                        description += "\n There are "+str(contents[x])+" doors."
+                    else:
+                        description += "\n There is only one door."
+
+            return description
+
         else:
             raise NotImplementedError
+
 
 
     def insert(self, item, at_y, at_x, obj=None):
@@ -102,19 +182,22 @@ class RoomFactory():
         r = Room(randint(3, 15), randint(3, 10))
         self.insert_door(r)
         self.insert_thing(r, Cell.Type.FIRE)
-        self.insert_thing(r, Cell.Type.PLAYER)
         return r
+
+    def add_player(self, config, room):
+        self.insert_thing(room, Cell.Type.PLAYER)
 
 class ImageMaker():
     def __init__(self):
+        resources = os.path.join(pathlib.Path(__file__).parent.absolute(), "../Resources/Tiles/")
         self.tile_sets = {
             "dungeon": {
-                "file": Image.open("wee_dungeon.png", "r"),
+                "file": Image.open(os.path.join(resources, "wee_dungeon.png"), "r"),
                 "initial_offset": (10, 10),
                 "spacing": (10, 10)
             },
             "monster": {
-                "file": Image.open("wee_monsters.png", "r"),
+                "file": Image.open(os.path.join(resources, "wee_monsters.png"), "r"),
                 "initial_offset": (25,4),
                 "spacing": (10, 10)
             }
@@ -136,7 +219,13 @@ class ImageMaker():
             Cell.Type.DOOR: ("dungeon", [(0, 1), (0, 1)]),
             Cell.Type.PORTAL: ("dungeon", [(6, 4), (6, 4)]),
             Cell.Type.FIRE: ("dungeon", [(5, 2), (5, 3)]),
-            Cell.Type.PLAYER: ("monster", [(1, 0), (1, 4)]),
+            Cell.Type.PLAYER_ARCHER: ("monster", [(1, 0), (1, 4)]),
+            Cell.Type.PLAYER_FIGHTER: ("monster", [(0, 0), (0, 4)]),
+            Cell.Type.PLAYER_MAGE: ("monster", [(2, 0), (2, 4)]),
+            Cell.Type.PLAYER_CLERIC: ("monster", [(3, 0), (3, 4)]),
+            Cell.Type.PLAYER_DRUID: ("monster", [(4, 0), (4, 4)]),
+            Cell.Type.PLAYER_BMAGE: ("monster", [(5, 0), (5, 4)]),
+            Cell.Type.PLAYER_PALADIN: ("monster", [(6, 0), (6, 4)]),
         }
         tile = display_lookup[cell_type]
 
@@ -173,15 +262,16 @@ class ImageMaker():
 
     def save(self):
         canvases = self.prepare_for_screen()
-        print(canvases)
+        filename = "TestImage" + str(randint(0, 10000)) + ".gif"
         canvases[0].save(
-            "TestImage" + str(randint(0, 10000)) + ".gif",
+            filename,
             format="GIF",
             append_images=[c for c in canvases[1:]],
             save_all=True,
             duration=self.animation_length,
             loop=0,
         )
+        return filename
 
 
 
