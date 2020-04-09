@@ -1,9 +1,11 @@
 from random import randint, choice
 import numpy as np
 from enum import Enum, auto
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 import sys
 import os
+import xlsxwriter
+import random
 import tracery
 import pathlib
 
@@ -95,7 +97,6 @@ class Room():
                     "On the ground #floor_decor#"
                 ],
                 "wall_hanging": [
-#                    "are several scones, illuminating the room"    #TODO: Lighting
                     "is a torn tapestry telling a story of #legend#",
                     "an engraving depicting #legend#",
                     "a shattered mirror hangs by the thinnest of strings"
@@ -173,13 +174,15 @@ class RoomFactory():
 
         room.insert(Cell.Type.DOOR, chosen_y, chosen_x)
 
-    def insert_thing(self, room, thing):
+    def insert_thing(self, room, thing, solid=True):
         x = randint(room.x_bounds[0]+1, room.x_bounds[1]-1)
         y = randint(room.y_bounds[0]+1, room.y_bounds[1]-1)
         room.grid[y][x].setType(thing)
+        return y, x
 
     def create_room(self):
-        r = Room(randint(3, 15), randint(3, 10))
+        r = Room(randint(3, 20), randint(3, 15))
+        # r = Room(randint(20, 30), randint(20, 30))
         self.insert_door(r)
         self.insert_thing(r, Cell.Type.FIRE)
         return r
@@ -189,15 +192,15 @@ class RoomFactory():
 
 class ImageMaker():
     def __init__(self):
-        resources = os.path.join(pathlib.Path(__file__).parent.absolute(), "../Resources/Tiles/")
+        resources = os.path.join(pathlib.Path(__file__).parent.absolute(), "../Resources/")
         self.tile_sets = {
             "dungeon": {
-                "file": Image.open(os.path.join(resources, "wee_dungeon.png"), "r"),
+                "file": Image.open(os.path.join(resources, "Tiles/wee_dungeon.png"), "r"),
                 "initial_offset": (10, 10),
                 "spacing": (10, 10)
             },
             "monster": {
-                "file": Image.open(os.path.join(resources, "wee_monsters.png"), "r"),
+                "file": Image.open(os.path.join(resources, "Tiles/wee_monsters.png"), "r"),
                 "initial_offset": (25,4),
                 "spacing": (10, 10)
             }
@@ -207,12 +210,57 @@ class ImageMaker():
         self.animation_frames = 2
         self.animation_length = 300  # ms
 
+        self.fonts = {
+            "oryx_single_digit": ImageFont.truetype(os.path.join(resources, "Fonts/oryx-simplex.ttf"), 7),
+            "oryx_double_digit": ImageFont.truetype(os.path.join(resources, "Fonts/oryx-simplex.ttf"), 6)
+        }
+
     def create_base(self, shape):
+
+        def draw_grid_reference(canvas, idx, h_or_v):
+            draw = ImageDraw.Draw(canvas)
+            if h_or_v == "h":
+                coords = ((idx+1)*self.tile_size[1], 0)
+                label = xlsxwriter.utility.xl_col_to_name(idx)
+            elif h_or_v == "v":
+                coords = (0, (idx+1)*self.tile_size[0])
+                label = str(idx)
+            else:
+                raise ValueError
+
+            if len(label) == 1:
+                font_choice = self.fonts["oryx_single_digit"]
+            elif len(label) == 2:
+                font_choice = self.fonts["oryx_double_digit"]
+            else:
+                raise NotImplementedError
+
+            draw.text(coords, label, font=font_choice)
+
+
+        backgrounds = {
+            "dungeon": (56, 56, 56, 255),
+            "desert": (250, 162, 27, 255)
+        }
+
+        shape = (shape[0]+1, shape[1]+1)
         size = (shape[0] * self.tile_size[0], shape[1] * self.tile_size[1])
+        bg = backgrounds[random.choice(list(backgrounds.keys()))]
         self.canvas = [Image.new("RGBA", size, (56, 56, 56, 255)) for _ in range(self.animation_frames)]
         self.canvas[0].save("background.png")
 
+        for c in self.canvas:
+            for x in range(shape[0]):
+                draw_grid_reference(c, x, "h")
+            for y in range(shape[1]):
+                draw_grid_reference(c, y, "v")
+
     def paintTile(self, cell_type, y, x):
+
+        # Offset for Grid Index
+        x = x+1
+        y = y+1 
+
         display_lookup = {
             Cell.Type.EMPTY: ("dungeon", [(4, 0), (4, 0)]),
             Cell.Type.WALL: ("dungeon", [(0, 0), (0, 0)]),
