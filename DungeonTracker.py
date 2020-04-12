@@ -1,24 +1,16 @@
 from RoomGenerator.main import RoomFactory, Cell
+from RoomGenerator.AssetManager import PlayerIconManager
+import xlsxwriter
+
+
+PIM = PlayerIconManager()
 
 class Player():
     def __init__(self, ID, icon):
         self.ID = ID
         self.coords = None
-        self.choose_icon(icon)
+        self.icon = icon
 
-    def choose_icon(self, icon):
-
-        choices = {
-            "1": Cell.Type.PLAYER_FIGHTER,
-            "2": Cell.Type.PLAYER_ARCHER,
-            "3": Cell.Type.PLAYER_MAGE,
-            "4": Cell.Type.PLAYER_CLERIC,
-            "5": Cell.Type.PLAYER_DRUID,
-            "6": Cell.Type.PLAYER_BMAGE,
-            "7": Cell.Type.PLAYER_PALADIN
-        }
-
-        self.icon = choices[str(icon)]
 
 class DungeonTracker():
     def __init__(self):
@@ -36,7 +28,7 @@ class DungeonTracker():
 
         # Populate Room
         for p in self.players:
-            p.coords = self.room_factory.insert_thing(room, p.icon)
+            p.coords = self.room_factory.insert_thing_randomly(room, Cell.Type.PLAYER , thing_ID=p.ID)
 
         self.current_room = room
         return room
@@ -50,13 +42,37 @@ class DungeonTracker():
         if not already_exists:
             p = Player(ID, icon)
             self.players.append(p)
-            self.room_factory.insert_thing(self.current_room, p.icon)
+            self.room_factory.insert_thing_randomly(self.current_room, Cell.Type.PLAYER, thing_ID=ID)
+
+    def movePlayer(self, ID, location):
+        ID = str(ID)
+        location = location.strip(" ").upper()
+        try:
+            location = list(xlsxwriter.utility.xl_cell_to_rowcol(location))
+        except AttributeError:
+            # Backwards, silly users.
+            location = list(xlsxwriter.utility.xl_cell_to_rowcol(location[::-1]))
+
+        location = location[::-1]
+        location[1] += 1
+
+        for p in self.players:
+            print(ID, "==", p.ID)
+            if ID == str(p.ID):            
+                pass_status, msg = self.room_factory.move_thing(self.current_room, ID, location)       
+                return pass_status, msg
+
+        return (False, "player not found")
+
 
     def draw(self):
         return self.current_room.show(gui="img")
 
     def describe(self):
         return self.current_room.show(gui="describe")
+
+    def debug(self):
+        return self.current_room.show(gui="cmd")
 
     def get_player(self, which):
         for p in self.players:

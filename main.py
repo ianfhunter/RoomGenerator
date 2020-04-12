@@ -1,7 +1,5 @@
 from random import randint, choice
 import numpy as np
-from enum import Enum, auto
-from PIL import Image, ImageDraw, ImageFont
 import sys
 import os
 import xlsxwriter
@@ -9,46 +7,9 @@ import random
 import tracery
 import pathlib
 
-class Cell():
-    class Type(Enum):
-        EMPTY = auto()
-        WALL = auto()
-        DOOR = auto()
-        PORTAL = auto()
-        FIRE = auto()
-        PLAYER_ARCHER = auto()
-        PLAYER_FIGHTER = auto()
-        PLAYER_MAGE = auto()
-        PLAYER_CLERIC = auto()
-        PLAYER_DRUID = auto()
-        PLAYER_BMAGE = auto()
-        PLAYER_PALADIN = auto()
-
-    def __init__(self):
-        self.repr = " "
-        self.type = Cell.Type.EMPTY
-        self.contents = []
-
-    def setType(self, t):
-        type_repr_map = {
-            Cell.Type.EMPTY: " ",
-            Cell.Type.WALL: "#",
-            Cell.Type.DOOR: "▤",
-            Cell.Type.PORTAL: "🌀",
-            Cell.Type.FIRE: "🔥",
-            Cell.Type.PLAYER_ARCHER: "A",
-            Cell.Type.PLAYER_FIGHTER: "F",
-            Cell.Type.PLAYER_MAGE: "W",
-            Cell.Type.PLAYER_CLERIC: "C",
-            Cell.Type.PLAYER_DRUID: "D",
-            Cell.Type.PLAYER_BMAGE: "B",
-            Cell.Type.PLAYER_PALADIN: "P"
-        }
-        self.type = t
-        self.repr = type_repr_map[t]
-
-    def setContents(self, obj):
-        self.contents = [obj]
+from RoomGenerator.Cell import Cell
+from RoomGenerator.Rules import Rules
+from RoomGenerator.Display import ImageMaker
 
 class Room():
     def __init__(self, len_x, len_y):
@@ -79,7 +40,7 @@ class Room():
             i.create_base(self.grid.shape)
             for y in range(len(self.grid)):
                 for x in range(len(self.grid[0])):
-                    i.paintTile(self.grid[y][x].type, y, x)
+                    i.paintTile(self.grid[y][x], y, x)
             return i.save()
         elif gui == "describe":
 
@@ -149,11 +110,22 @@ class Room():
 
 
 
-    def insert(self, item, at_y, at_x, obj=None):
-        self.grid[at_y][at_x].setType(item)
+    def insert(self, item, at_y, at_x, obj=None, ID=0):
+        self.grid[at_y][at_x].setType(item, ID=ID)
         if obj is not None:
             self.grid[at_y][at_x].setContents(obj)
 
+    def removeObjectByID(self, ID):
+        popped = []
+        for y in range(len(self.grid)):
+            for x in range(len(self.grid[y])):
+                if ID == self.grid[y][x].contentID:
+                    popped.append((self.grid[y][x], y, x))
+                    self.grid[y][x] = Cell()
+
+        if len(popped) == 0:
+            print(f"ID '{ID}' not found.")
+        return popped
 
 class RoomFactory():
     def __init__(self):
@@ -174,152 +146,43 @@ class RoomFactory():
 
         room.insert(Cell.Type.DOOR, chosen_y, chosen_x)
 
-    def insert_thing(self, room, thing, solid=True):
-        x = randint(room.x_bounds[0]+1, room.x_bounds[1]-1)
-        y = randint(room.y_bounds[0]+1, room.y_bounds[1]-1)
-        room.grid[y][x].setType(thing)
-        return y, x
+
+    def insert_thing(self, room, thing_icon, thing_ID, where_y, where_x):
+        room.insert(thing_icon, where_y, where_x, ID=thing_ID)
+        return where_y, where_x
+
+    def insert_thing_randomly(self, room, thing_icon, thing_ID=0, solid=True):
+        chosen_x = randint(room.x_bounds[0]+1, room.x_bounds[1]-1)
+        chosen_y = randint(room.y_bounds[0]+1, room.y_bounds[1]-1)
+        return self.insert_thing(room, thing_icon, thing_ID, chosen_y, chosen_x)
+
+    def move_thing(self, room, ID, location):
+
+        if location[1] <= room.x_bounds[0] or location[1] >= room.x_bounds[1]:
+            return False, "Something is blocking you (Y)"
+        if location[0] <= room.y_bounds[0] or location[0] >= room.y_bounds[1]:
+            return False, "Something is blocking you (X)"
+        objs = room.removeObjectByID(ID)
+        if(len(objs) != 1):
+            return False, "Object Not Found"
+        obj = objs[0]
+
+        rules = Rules()
+        if not rules.movementPermitted(obj[1:], location):
+            # reset
+            self.insert_thing(room, obj[0].type, obj[0].contentID, obj[1], obj[2])
+            return False, "Movement not allowed by rules" 
+
+        # print(obj[1], obj[2], "->", location[0], location[1])
+        self.insert_thing(room, obj[0].type, obj[0].contentID, location[0], location[1])
+        return True, ""
 
     def create_room(self):
         r = Room(randint(3, 20), randint(3, 15))
         # r = Room(randint(20, 30), randint(20, 30))
         self.insert_door(r)
-        self.insert_thing(r, Cell.Type.FIRE)
+        self.insert_thing_randomly(r, Cell.Type.FIRE)
         return r
-
-    def add_player(self, config, room):
-        self.insert_thing(room, Cell.Type.PLAYER)
-
-class ImageMaker():
-    def __init__(self):
-        resources = os.path.join(pathlib.Path(__file__).parent.absolute(), "../Resources/")
-        self.tile_sets = {
-            "dungeon": {
-                "file": Image.open(os.path.join(resources, "Tiles/wee_dungeon.png"), "r"),
-                "initial_offset": (10, 10),
-                "spacing": (10, 10)
-            },
-            "monster": {
-                "file": Image.open(os.path.join(resources, "Tiles/wee_monsters.png"), "r"),
-                "initial_offset": (25,4),
-                "spacing": (10, 10)
-            }
-        }
-        self.tile_size = (10, 10)
-        self.scaling_method = Image.NEAREST
-        self.animation_frames = 2
-        self.animation_length = 300  # ms
-
-        self.fonts = {
-            "oryx_single_digit": ImageFont.truetype(os.path.join(resources, "Fonts/oryx-simplex.ttf"), 7),
-            "oryx_double_digit": ImageFont.truetype(os.path.join(resources, "Fonts/oryx-simplex.ttf"), 6)
-        }
-
-    def create_base(self, shape):
-
-        def draw_grid_reference(canvas, idx, h_or_v):
-            draw = ImageDraw.Draw(canvas)
-            if h_or_v == "h":
-                coords = ((idx+1)*self.tile_size[1], 0)
-                label = xlsxwriter.utility.xl_col_to_name(idx)
-            elif h_or_v == "v":
-                coords = (0, (idx+1)*self.tile_size[0])
-                label = str(idx)
-            else:
-                raise ValueError
-
-            if len(label) == 1:
-                font_choice = self.fonts["oryx_single_digit"]
-            elif len(label) == 2:
-                font_choice = self.fonts["oryx_double_digit"]
-            else:
-                raise NotImplementedError
-
-            draw.text(coords, label, font=font_choice)
-
-
-        backgrounds = {
-            "dungeon": (56, 56, 56, 255),
-            "desert": (250, 162, 27, 255)
-        }
-
-        shape = (shape[0]+1, shape[1]+1)
-        size = (shape[0] * self.tile_size[0], shape[1] * self.tile_size[1])
-        bg = backgrounds[random.choice(list(backgrounds.keys()))]
-        self.canvas = [Image.new("RGBA", size, (56, 56, 56, 255)) for _ in range(self.animation_frames)]
-        self.canvas[0].save("background.png")
-
-        for c in self.canvas:
-            for x in range(shape[0]):
-                draw_grid_reference(c, x, "h")
-            for y in range(shape[1]):
-                draw_grid_reference(c, y, "v")
-
-    def paintTile(self, cell_type, y, x):
-
-        # Offset for Grid Index
-        x = x+1
-        y = y+1 
-
-        display_lookup = {
-            Cell.Type.EMPTY: ("dungeon", [(4, 0), (4, 0)]),
-            Cell.Type.WALL: ("dungeon", [(0, 0), (0, 0)]),
-            Cell.Type.DOOR: ("dungeon", [(0, 1), (0, 1)]),
-            Cell.Type.PORTAL: ("dungeon", [(6, 4), (6, 4)]),
-            Cell.Type.FIRE: ("dungeon", [(5, 2), (5, 3)]),
-            Cell.Type.PLAYER_ARCHER: ("monster", [(1, 0), (1, 4)]),
-            Cell.Type.PLAYER_FIGHTER: ("monster", [(0, 0), (0, 4)]),
-            Cell.Type.PLAYER_MAGE: ("monster", [(2, 0), (2, 4)]),
-            Cell.Type.PLAYER_CLERIC: ("monster", [(3, 0), (3, 4)]),
-            Cell.Type.PLAYER_DRUID: ("monster", [(4, 0), (4, 4)]),
-            Cell.Type.PLAYER_BMAGE: ("monster", [(5, 0), (5, 4)]),
-            Cell.Type.PLAYER_PALADIN: ("monster", [(6, 0), (6, 4)]),
-        }
-        tile = display_lookup[cell_type]
-
-        for canvas_idx, t in enumerate(tile[1]):
-            tileset = self.tile_sets[tile[0]]
-            offset = tileset["initial_offset"]
-            tile_file = tileset["file"]
-            spacing = tileset["spacing"]
-
-            # Get Tile
-            y_begin = offset[0] + t[0] * (self.tile_size[0] + spacing[0])
-            y_end = y_begin + self.tile_size[0]
-
-            x_begin = offset[1] + t[1] * (self.tile_size[1] + spacing[1])
-            x_end = x_begin + self.tile_size[1]
-
-            tile_area = (x_begin, y_begin, x_end, y_end)
-            cropped_t = tile_file.crop(tile_area)
-
-            # Place
-            where = (y * self.tile_size[0], x * self.tile_size[1])
-
-            self.canvas[canvas_idx].paste(cropped_t, where, cropped_t)
-
-
-    def prepare_for_screen(self, resize=True):
-        scale_width = 10
-        scale_height = 10
-        upscaled_canvas = []
-        for f in range(self.animation_frames):
-            new_size = (self.canvas[f].size[0] * scale_height, self.canvas[f].size[1] * scale_width)
-            upscaled_canvas.append(self.canvas[f].resize(new_size, self.scaling_method))
-        return upscaled_canvas
-
-    def save(self):
-        canvases = self.prepare_for_screen()
-        filename = "TestImage" + str(randint(0, 10000)) + ".gif"
-        canvases[0].save(
-            filename,
-            format="GIF",
-            append_images=[c for c in canvases[1:]],
-            save_all=True,
-            duration=self.animation_length,
-            loop=0,
-        )
-        return filename
 
 
 
